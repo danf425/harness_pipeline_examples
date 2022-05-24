@@ -1,0 +1,60 @@
+pipeline:
+    name: VeracodePOV_PlatformScan
+    identifier: VeracodePOV_PlatformScan
+    projectIdentifier: SecurityScans
+    orgIdentifier: default
+    tags: {}
+    allowStageExecutions: false
+    properties:
+        ci:
+            codebase:
+                connectorRef: account.jhttp_state
+                build: <+input>
+    stages:
+        - stage:
+              name: Build
+              identifier: Build
+              type: CI
+              spec:
+                  cloneCodebase: true
+                  infrastructure:
+                      type: KubernetesDirect
+                      spec:
+                          connectorRef: account.danfstatestcluster
+                          namespace: harness-delegate-ng-statest
+                          automountServiceAccountToken: true
+                  execution:
+                      steps:
+                          - step:
+                                type: Run
+                                name: Build Java App
+                                identifier: Build_Java_App
+                                spec:
+                                    connectorRef: account.harnessImage
+                                    image: maven:3.5.2-jdk-8-alpine
+                                    shell: Sh
+                                    command: |
+                                        mvn clean package -DskipTests
+                                        echo <+artifact.image>
+                                        echo <+trigger.artifact.build>
+                                        export jar_file_target=$(echo /harness/target/*.jar)
+                                    outputVariables:
+                                        - name: jar_file_target
+                          - step:
+                                type: Run
+                                name: VC_PlatformScan
+                                identifier: VC_PlatformScan
+                                spec:
+                                    connectorRef: dmontanez_dockerhub
+                                    image: veracode/api-wrapper-java
+                                    shell: Sh
+                                    command: |-
+                                        #Run API-Wrapper based scan
+                                        java -jar /opt/veracode/api-wrapper.jar -vid <+secrets.getValue("account.Veracode_VID")> -vkey <+secrets.getValue("account.Veracode_VKEY")> -action UploadAndScan -createprofile true -appname "CIS Test Application" -version 1.0 -filepath <+pipeline.stages.Build.spec.execution.steps.Build_Java_App.output.outputVariables.jar_file_target>
+                                failureStrategies:
+                                    - onFailure:
+                                          errors:
+                                              - AllErrors
+                                          action:
+                                              type: MarkAsSuccess
+

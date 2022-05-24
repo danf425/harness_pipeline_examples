@@ -1,0 +1,61 @@
+pipeline:
+    name: VeracodePOV_PipelineScan
+    identifier: veracodepov
+    allowStageExecutions: false
+    projectIdentifier: SecurityScans
+    orgIdentifier: default
+    tags: {}
+    properties:
+        ci:
+            codebase:
+                connectorRef: account.jhttp_state
+                build: <+input>
+    stages:
+        - stage:
+              name: Build
+              identifier: Build
+              type: CI
+              spec:
+                  cloneCodebase: true
+                  infrastructure:
+                      type: KubernetesDirect
+                      spec:
+                          connectorRef: account.danfstatestcluster
+                          namespace: harness-delegate-ng-statest
+                          automountServiceAccountToken: true
+                  execution:
+                      steps:
+                          - step:
+                                type: Run
+                                name: Build Java App
+                                identifier: Build_Java_App
+                                spec:
+                                    connectorRef: account.harnessImage
+                                    image: maven:3.5.2-jdk-8-alpine
+                                    shell: Sh
+                                    command: |
+                                        mvn clean package -DskipTests
+                                        echo <+artifact.image>
+                                        echo <+trigger.artifact.build>
+                                        export jar_file_target=$(echo /harness/target/*.jar)
+                                    outputVariables:
+                                        - name: jar_file_target
+                          - step:
+                                type: Run
+                                name: VC_PipelineScan
+                                identifier: VC_PipelineScan
+                                spec:
+                                    connectorRef: dmontanez_dockerhub
+                                    image: veracode/pipeline-scan:latest
+                                    shell: Sh
+                                    command: |+
+                                        #Run VV Pipeline Scan JAR file
+                                        java -jar /opt/veracode/pipeline-scan.jar -vid <+secrets.getValue("account.Veracode_VID")> -vkey <+secrets.getValue("account.Veracode_VKEY")> --file <+pipeline.stages.Build.spec.execution.steps.Build_Java_App.output.outputVariables.jar_file_target> -sf veracode-scan-results.txt -so true -jo true -jf veracode-scan-results.json --issue_details true -fjf veracode-scan-results-filtered.json -p project_name_demo_harness -r v1.0.0
+
+                                failureStrategies:
+                                    - onFailure:
+                                          errors:
+                                              - AllErrors
+                                          action:
+                                              type: MarkAsSuccess
+
